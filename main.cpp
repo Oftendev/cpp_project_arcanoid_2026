@@ -26,10 +26,31 @@ struct Block {
     Block() : type(BlockType::Normal), health(1), isAlive(true) {}
 };
 
+// Типы бонусов
+enum class BonusType {
+    ExpandPaddle, // Увеличение платформы
+    ShrinkPaddle, // Уменьшение платформы
+    SpeedUpBall, // Ускорение мяча
+    SlowDownBall, // Замедление мяча
+    Stick, // Прилипание мяча к платформе
+    BottomShield, // Одноразовое дно
+    RandomTurn // Случайное изменение траектории
+};
+
+// Класс падающего бонуса падающего бонуса
+struct Bonus {
+    BonusType type;
+    sf::Vector2f pos;
+    sf::Vector2f size;
+    sf::Vector2f velocity;
+    bool isAlive;
+    Bonus() : isAlive(false), size(20.0f, 20.0f), velocity(0.0f, 200.0f) {}
+};
+
 
 class Arkanoid {
 public:
-    Arkanoid(int w, int h): width(w), height(h), score(0), isPaused(false), isGameOver(false){
+    Arkanoid(int w, int h): width(w), height(h), score(0), isPaused(false), isGameOver(false), isVictory(false) {
         // Инициализация генератора случайных чисел
         rng.seed(static_cast<unsigned int>(std::time(nullptr)));
         // Загружаем шрифт
@@ -38,7 +59,7 @@ public:
         }
         
         // Инициализируем платформу (её левый верхний угол)
-        paddle.width = 100.f;
+        paddle.width = 100.0f;
         paddle.height = 10.0f;
         paddle.pos.x = (width - paddle.width) / 2.0f;
         paddle.pos.y = height - 50.0f;
@@ -51,6 +72,14 @@ public:
         ball.pos.y = paddle.pos.y - ball.radius;
         ball.velocity.x = 0.0f;
         ball.velocity.y = 0.0f;
+
+        // Инициализируем параметры для бонусов
+        originalPaddleWidth = paddle.width;
+        originalBallSpeed = 400.0f; // начальная скорость
+        paddleResizeTimer = 0.0f;;
+        ballStickTimer = 0.0f;
+        hasBottomShield = false;
+
         // Инициализируем блоки
         initializeBlocks();
     }
@@ -134,25 +163,25 @@ public:
         if (event.type == sf::Event::KeyPressed){
             // Проверяем установленные клавиши
             switch(event.key.code) {
-                case sf::Keyboard::Space:
+                case sf::Keyboard::Space: {
                     if (!isPaused && ball.attached) {
                         // Здесь запустить шарик
                         launchBall();
                     }
                     break;
-
-                case sf::Keyboard::P:
+                }
+                case sf::Keyboard::P: {
                     if (!isGameOver) {
                         // Переключить паузу
                         switchPause();
                     }
                     break;
-                    
-                case sf::Keyboard::R:
+                }
+                case sf::Keyboard::R: {
                     // Перезапусть игру
                     restartGame();
                     break;
-                    
+                }
                 default:
                     break;
                     
@@ -177,11 +206,12 @@ public:
             // Олтичия для каждого типа блока
             float blockDark = 1.0f - (block.health - 1) * 0.1f; // Для hardened
             switch(block.type) {
-                case BlockType::Normal:
+                case BlockType::Normal: {
                     blockRect.setFillColor(sf::Color(124, 252, 0));
                     blockText.setString("");
                     break;
-                case BlockType::Hardened:
+                }
+                case BlockType::Hardened: {
                     //int alpha = 100 + (block.health - 1) * 30;
                     
                     // Чем больше здоровья, тем толще граница
@@ -189,18 +219,22 @@ public:
                     blockRect.setOutlineThickness(blockRect.getOutlineThickness()*block.health);
                     blockText.setString(std::to_string(block.health));
                     break;
-                case BlockType::Bonus:
+                }
+                case BlockType::Bonus: {
                     blockRect.setFillColor(sf::Color(255, 215, 0));
                     blockText.setString("?");
                     break;
-                case BlockType::SpeedUp:
+                }
+                case BlockType::SpeedUp: {
                     blockRect.setFillColor(sf::Color(0, 191, 255));
                     blockText.setString(">>");
                     break;
-                case BlockType::Indestructible:
+                }
+                case BlockType::Indestructible: {
                     blockRect.setFillColor(sf::Color(128, 128, 128)); //Серый
                     blockText.setString("#");
                     break;
+                }
             }
             blockText.setFillColor(sf::Color::Black);
             // Выравниваем текст
@@ -211,6 +245,105 @@ public:
             window.draw(blockRect);
             window.draw(blockText);
         }
+
+        // Отрисовка падающих бонусов
+        for (const Bonus& bonus : bonuses) {
+            sf::RectangleShape bonusRect(bonus.size);
+            bonusRect.setPosition(bonus.pos);
+            bonusRect.setOutlineColor(sf::Color::Black);
+            bonusRect.setOutlineThickness(-1.0f);
+
+            sf::Text bonusText;
+            bonusText.setFont(font);
+            bonusText.setCharacterSize(static_cast<unsigned>(bonus.size.y * 0.6f));
+            bonusText.setFillColor(sf::Color::Black);
+
+            switch (bonus.type) {
+                case BonusType::ExpandPaddle: {
+                    bonusRect.setFillColor(sf::Color::Green);
+                    bonusText.setString("+");
+                    break;
+                }
+                case BonusType::ShrinkPaddle: {
+                    bonusRect.setFillColor(sf::Color::Red);
+                    bonusText.setString("-");
+                    break;
+                }
+                case BonusType::SpeedUpBall: {
+                    bonusRect.setFillColor(sf::Color(0, 191, 255));
+                    bonusText.setString(">>");
+                    break;
+                }
+                case BonusType::SlowDownBall: {
+                    bonusRect.setFillColor(sf::Color(128, 0, 128));
+                    bonusText.setString("<<");
+                    break;
+                }
+                case BonusType::Stick: {
+                    bonusRect.setFillColor(sf::Color::White);
+                    bonusText.setString("|");
+                    break;
+                }
+                case BonusType::BottomShield: {
+                    bonusRect.setFillColor(sf::Color::White);
+                    bonusText.setString("_");
+                    break;
+                }
+                case BonusType::RandomTurn: {
+                    bonusRect.setFillColor(sf::Color::Magenta);
+                    bonusText.setString("*");                
+                    break;    
+                }
+            }
+            // Выравниваем текст
+            sf::FloatRect textBounds = bonusText.getLocalBounds();
+            bonusText.setOrigin(textBounds.left + textBounds.width / 2.0f, textBounds.top + textBounds.height / 2.0f);
+            bonusText.setPosition(bonus.pos.x + bonus.size.x / 2.0f, bonus.pos.y + bonus.size.y / 2.0f); 
+            
+            window.draw(bonusRect);
+            window.draw(bonusText);
+        }
+
+        // ОТрисовка активных бонусов
+        int bonusLine = 0;
+        if (paddleResizeTimer > 0.0f) {
+            sf::Text txt;
+            txt.setFont(font);
+            txt.setCharacterSize(16);
+            txt.setString("Paddle: " + std::to_string(static_cast<int>(paddleResizeTimer)) + "s");
+            txt.setFillColor(sf::Color::White);
+            txt.setPosition(width - 100.0f, 20.0f + bonusLine * 20.0f);
+            bonusLine++;
+            window.draw(txt);
+        }
+        if (ballStickTimer > 0.0f) {
+            sf::Text txt;
+            txt.setFont(font);
+            txt.setCharacterSize(16);
+            txt.setString("Stick: " + std::to_string(static_cast<int>(ballStickTimer)) + "s");
+            txt.setFillColor(sf::Color::White);
+            txt.setPosition(width - 100.0f, 20.0f + bonusLine * 20.0f);
+            bonusLine++;
+            window.draw(txt);
+        }
+        if (hasBottomShield) {
+            sf::Text txt;
+            txt.setFont(font);
+            txt.setCharacterSize(16);
+            txt.setString("Shield ready");
+            txt.setFillColor(sf::Color::White);
+            txt.setPosition(width - 100.0f, 20.0f + bonusLine * 20.0f);
+            bonusLine++;
+            window.draw(txt);
+            sf::RectangleShape shield;
+            shield.setPosition(0.0f, height - 10.0f);
+            shield.setSize(sf::Vector2f(width, 10.0f));
+            shield.setOutlineColor(sf::Color::Black);
+            shield.setOutlineThickness(-1.0f);
+            shield.setFillColor(sf::Color::White);
+            window.draw(shield);
+        }
+
         // Отрисовка платформы
         sf::RectangleShape paddleRect(sf::Vector2f(paddle.width, paddle.height));
         paddleRect.setPosition(paddle.pos);
@@ -258,7 +391,7 @@ public:
             window.draw(pauseText);
         }
 
-        // Отрисовка экрана GameOver
+        // Отрисовка экрана GameOver (и Victory)
         if (isGameOver) {
             sf::RectangleShape gameOverRect(sf::Vector2f(width, height));
             gameOverRect.setFillColor(sf::Color(0, 0, 0, 180));
@@ -267,8 +400,14 @@ public:
             sf::Text gameOverText;
             gameOverText.setFont(font);
             gameOverText.setCharacterSize(50);
-            gameOverText.setString("Game Over");
-            gameOverText.setFillColor(sf::Color::Red);
+            if (isVictory) {
+                gameOverText.setString("You won!");
+                gameOverText.setFillColor(sf::Color::Green);
+            } else {
+                gameOverText.setString("Game Over");
+                gameOverText.setFillColor(sf::Color::Red);
+            }
+
             sf::FloatRect textBounds = gameOverText.getLocalBounds();
             gameOverText.setOrigin(textBounds.left + textBounds.width / 2.0f, textBounds.top + textBounds.height / 2.0f);
             gameOverText.setPosition(width / 2.0f, height / 2.0f - 50);
@@ -288,9 +427,22 @@ public:
 
     void update(float dt) {
         if (isPaused || isGameOver) return;
-
         // На всякий ограничим положение платформы
         paddle.pos.x = std::clamp(paddle.pos.x, 0.0f, width - paddle.width);
+
+        // Проверяем таймеры бонусов
+        if (paddleResizeTimer > 0.0f) {
+            paddleResizeTimer -= dt;
+            if (paddleResizeTimer <= 0.0f) {
+                setPaddleWidth(originalPaddleWidth);
+            }
+        }
+        if (ballStickTimer > 0.0f) {
+            ballStickTimer -= dt;
+            if (ballStickTimer <= 0.0f && ball.attached) {
+                launchBall();  // Автоматический запуск после прилипания
+            }
+        }
 
         // Если шарик не прилип, обновляем его физику
         if (!ball.attached) {
@@ -310,14 +462,18 @@ public:
             // Прооверка, что все блоки уничтожены
             if (countRemainingBlocks() == 0) {
                 isGameOver = true;
+                isVictory = true;
             }
-        }        
+        }
+        // Бонусы падают
+        updateBonuses(dt);
     }
 private:
     int width, height;
     int score;
     bool isPaused;
     bool isGameOver;
+    bool isVictory;
     sf::Font font;
     std::mt19937 rng;
     
@@ -336,6 +492,15 @@ private:
     } ball;
 
     std::vector<Block> blocks; // Список блоков
+
+    // Для эффектов бонусов
+    float paddleResizeTimer; // Таймер (сек)
+    float ballStickTimer;
+    bool hasBottomShield; // Включено ли дно
+    float originalPaddleWidth; // Исходная ширина платформы
+    float originalBallSpeed; // Исходная скорость шарика
+
+    std::vector<Bonus> bonuses; // Активные падающие бонусы
     
     // Генератор рандомных чисел в диапазоне
     int randomInRange(int a, int b){
@@ -343,6 +508,19 @@ private:
         return dist(rng);
     }
 
+    // Изменение ширины так. чтобы центр не изменял положение
+    void setPaddleWidth(float newWidth) {
+        float centerX = paddle.pos.x + paddle.width / 2.0f;
+        // Ограничение на размер платформы
+        paddle.width = std::clamp(newWidth, 25.0f, 300.0f);
+        paddle.pos.x = centerX - paddle.width / 2.0f;
+        paddle.pos.x = std::clamp(paddle.pos.x, 0.0f, width - paddle.width);
+        if (ball.attached) {
+            ball.pos.x = paddle.pos.x + paddle.width / 2.0f;
+        }
+    }
+
+    // Количество оставшихся разрушаемых блоков
     int countRemainingBlocks() {
         int count = 0;
         for (const Block& block : blocks) {
@@ -357,7 +535,8 @@ private:
     void launchBall() {
         ball.attached = false;
         ball.velocity.x = 0.0f;
-        ball.velocity.y = -400.0f;
+        ball.velocity.y = -originalBallSpeed;
+        ballStickTimer = 0.0f; // Обнуляем таймер для бонуса прилипания
     }
 
     // Взвращаем шарик на платфору
@@ -366,7 +545,7 @@ private:
         ball.pos.x = paddle.pos.x + paddle.width / 2.0f;
         ball.pos.y = paddle.pos.y - ball.radius;
         ball.velocity.x = 0.0f;
-        ball.velocity.y = 0.0f;        
+        ball.velocity.y = 0.0f;
     }
 
     // Проверяем коллизию со стенками, от которых отскакиваем
@@ -376,7 +555,6 @@ private:
             ball.pos.x = ball.radius;
             ball.velocity.x = -ball.velocity.x;
         }
-
         if (ball.pos.x + ball.radius > width) {
             ball.pos.x = width - ball.radius;
             ball.velocity.x = -ball.velocity.x;
@@ -392,7 +570,6 @@ private:
     // Проверка столкновения с блоками
     void checkCollisionsWithBlocks() {
         sf::FloatRect ballRect(ball.pos.x - ball.radius, ball.pos.y - ball.radius, ball.radius * 2, ball.radius * 2);
-
         for (Block& block : blocks) {
             // Пропускаем мёртые блоки
             if (!block.isAlive) continue;
@@ -434,9 +611,7 @@ private:
 
     void handleBlockHit(Block& block) {
         // Неразрушаемые блоки только отскакивают
-        if (block.type == BlockType::Indestructible) {
-            return;
-        }
+        if (block.type == BlockType::Indestructible) return;
         // Уменьшаем здоровье
         block.health--;
         // Начисляем очки за попадание
@@ -444,26 +619,48 @@ private:
         // Если блок уничтожен
         if (block.health <= 0) {
             block.isAlive = false;
-
             // Эффекты при уничтожении
             switch(block.type) {
-                case BlockType::Bonus:
-                    // Здесь надо добавить обработку бонуса
+                case BlockType::Bonus: {
+                    // Случайный бонус
+                    int r = randomInRange(0, 6);
+                    BonusType bt;
+                    switch (r) {
+                        case 0:
+                            bt = BonusType::ExpandPaddle;
+                            break;
+                        case 1:
+                            bt = BonusType::ShrinkPaddle;
+                            break;
+                        case 2:
+                            bt = BonusType::SpeedUpBall;
+                            break;
+                        case 3:
+                            bt = BonusType::SlowDownBall;
+                            break;
+                        case 4:
+                            bt = BonusType::Stick;
+                            break;
+                        case 5:
+                            bt = BonusType::BottomShield;
+                            break;
+                        case 6:
+                            bt = BonusType::RandomTurn;
+                            break;
+                        default: 
+                            break;
+                    }
+                    spawnBonus(block.pos, bt);
                     score += 5;
                     break;
-                case BlockType::SpeedUp:
-                    // Увеличиваем скорость шарика;
-                    // Нужно её как-то ограничить (разумно, чтоб за кажр не пролетал через блок)
-                    float maxSpeed = 800.0f;
-                    float koef = 1.1f;
-                    float currentSpeed = std::hypotf(ball.velocity.x, ball.velocity.y);
-                    if (currentSpeed * koef <= maxSpeed) {
-                        // Увеличиваем скорость, если она не будет превышать максимальную
-                        ball.velocity *= koef;
-                    } 
-                    
+                }
+                case BlockType::SpeedUp: {
+                    float currentSpeed = std::hypot(ball.velocity.x, ball.velocity.y);
+                    float speed = std::min(currentSpeed * 1.3f, 800.0f); // Чтобы скорость не была слишком высокой
+                    ball.velocity *= speed / currentSpeed;
                     score += 7;
                     break;
+                }
             }
         }
     }
@@ -487,8 +684,8 @@ private:
                 float angle = 1.22173f * offset; // 1.22173f радиан - 70 градусов
                 float currentSpeed = std::hypotf(ball.velocity.x, ball.velocity.y);
                 // Новая скорость
-                ball.velocity.x = currentSpeed*std::sin(angle);
-                ball.velocity.y = -currentSpeed*std::cos(angle);
+                ball.velocity.x = currentSpeed * std::sin(angle);
+                ball.velocity.y = -currentSpeed * std::cos(angle);
             }
         }
     }
@@ -496,14 +693,116 @@ private:
     void checkBallLost() {
         // Если шарик улетел за нижнюю границу
         if (ball.pos.y + ball.radius > height) {
-            // Вычитаем очки
-            score -= 10;           
-            // Возвращаем шарик на платформу
-            resetBall();
-            // Если количество баллов слишком мало - GameOver
-            if (score < -50) {
-                isGameOver = true;
+            // Проверяем присутствие щита
+            if (hasBottomShield) {
+                hasBottomShield = false;
+                resetBall();
+            } else {
+                // Вычитаем очки
+                score -= 10;           
+                // Возвращаем шарик на платформу
+                resetBall();
+                // Если количество баллов слишком мало - GameOver
+                if (score < -30) {
+                    isGameOver = true;
+                }
             }
+        }
+    }
+
+    // Функция создания бонусов
+    void spawnBonus(const sf::Vector2f& blockPos, BonusType type) {
+        Bonus b;
+        b.type = type;
+        b.pos = sf::Vector2f(blockPos.x, blockPos.y);
+        b.size = sf::Vector2f(20.0f, 20.0f);
+        b.velocity = sf::Vector2f(0.0f, 200.0f);
+        b.isAlive = true;
+        bonuses.push_back(b);
+    }
+
+    // Обновление бонусов
+    void updateBonuses(float dt) {
+        // Цикл по вектору (через iterator)
+        for (auto item = bonuses.begin(); item != bonuses.end(); ) {
+            item->pos.y += item->velocity.y * dt;
+            sf::FloatRect bonusRect(item->pos.x, item->pos.y, item->size.x, item->size.y);
+            sf::FloatRect paddleRect(paddle.pos.x, paddle.pos.y, paddle.width, paddle.height);
+            if (bonusRect.intersects(paddleRect)) {
+                // Если поймали бонус - удаляем
+                applyBonus(item->type);
+                item = bonuses.erase(item);
+            } else if (item->pos.y > height) {
+                // Если бонус упал - удаляем
+                item = bonuses.erase(item);
+            } else {
+                item++;
+            }
+        }
+    }
+
+    // Применение бонусов
+    void applyBonus(BonusType type) {
+        switch (type) {
+            case BonusType::ExpandPaddle: {
+                setPaddleWidth(originalPaddleWidth * 1.4f);
+                paddleResizeTimer = 10.0f; // Таймер в секундах
+                break;
+            }
+            case BonusType::ShrinkPaddle: {
+                setPaddleWidth(originalPaddleWidth * 0.6f);
+                paddleResizeTimer = 10.0f;
+                break;
+            }
+            case BonusType::SpeedUpBall: {
+                if (!ball.attached) {
+                    float currentSpeed = std::hypot(ball.velocity.x, ball.velocity.y);
+                    float speed = std::min(currentSpeed * 1.3f, 800.0f); // Чтобы скорость не была слишком высокой
+                    ball.velocity *= speed / currentSpeed;
+                }
+                break;
+            }
+            case BonusType::SlowDownBall: {
+                if (!ball.attached) {
+                    float currentSpeed = std::hypot(ball.velocity.x, ball.velocity.y);
+                    float speed = std::max(currentSpeed * 0.77f, 200.0f); // Чтобы скорость не была слишком низкой
+                    ball.velocity *= speed / currentSpeed;
+                }
+                break;
+            }
+            case BonusType::Stick: {
+                ball.attached = true;
+                ballStickTimer = 5.0f;
+                break;
+            }
+            case BonusType::BottomShield: {
+                hasBottomShield = true;
+                break;
+            }
+            case BonusType::RandomTurn: {
+                if (!ball.attached) {
+                    float currentSpeed = std::hypot(ball.velocity.x, ball.velocity.y);
+                    float angle = randomInRange(-70, 70) / 180.0f * 3.14159265358979323846f; // Угол отностиельно вертикали. Ограничиваем, иначе может начать двигаться почти горизонтально
+                    float directionY = (ball.velocity.y > 0.0f) ? 1.0f : -1.0f;
+                    ball.velocity.x = currentSpeed * std::sin(angle);
+                    ball.velocity.y = directionY * currentSpeed * std::cos(angle); // Если шарик летит вниз - после отклонения также летит вниз. Если вверх - то вверх.
+                }
+                break;
+            }
+        }
+    }
+    
+    // Сброс бонусных эффектов
+    void resetBonusEffects() {
+        bonuses.clear();
+        paddleResizeTimer = 0.0f;
+        ballStickTimer = 0.0f;
+        hasBottomShield = false;
+        setPaddleWidth(originalPaddleWidth);
+        if (!ball.attached) {
+            float currentSpeed = std::hypot(ball.velocity.x, ball.velocity.y);
+            if (currentSpeed > 0.0f)
+                ball.velocity *= originalBallSpeed/currentSpeed;
         }
     }
 
@@ -517,14 +816,13 @@ private:
         score = 0;
         isPaused = false;
         isGameOver = false;
+        isVictory = false;
+        // Сброс шарика
+        resetBall();
+        // Сброс эффектов
+        resetBonusEffects();
         // Сброс платформы
         paddle.pos.x = (width - paddle.width) / 2.0f;
-        // Сброс шарика
-        ball.attached = true;
-        ball.pos.x = paddle.pos.x + paddle.width / 2.0f;
-        ball.pos.y = paddle.pos.y - ball.radius;
-        ball.velocity.x = 0.0f;
-        ball.velocity.y = 0.0f;
         initializeBlocks();
     }
 };
